@@ -75,7 +75,7 @@ ServletContextListener接口里的函数会结合Web容器的生命周期被调�
 
 **那么ContextLoaderListener的作用是什么？**
 
-ContextLoaderListener因为实现了**ServletContextListener**接口，可以监听web容器（即ServletContext）是否启动或者销毁，一旦web容器启动，ContextLoaderListener的contextInitialized方法会被调用，该方法的内容是继续调用 initWebApplicationContext 方法，于是我们再跟踪 initWebApplicationContext。(ContextLoaderListener 是 ContextLoader 的子类，所以其实是调用了父类的 initWebApplicationContext 方法。该方法主要是创建IOC容器并初始化)
+ContextLoaderListener因为实现了**ServletContextListener**接口，可以监听web容器（即ServletContext）是否启动或者销毁，一旦web容器启动，ContextLoaderListener的contextInitialized方法会被调用，该方法的内容是继续调用 initWebApplicationContext 方法，于是我们再跟踪 initWebApplicationContext。(ContextLoaderListener 是 ContextLoader 的子类，所以其实是调用了父类ContextLoader的 initWebApplicationContext 方法。该方法主要是创建IOC容器并初始化)
 
 ```java
 public WebApplicationContext initWebApplicationContext(ServletContext servletContext) {			 
@@ -99,7 +99,7 @@ public WebApplicationContext initWebApplicationContext(ServletContext servletCon
 }
 ```
 
-此处关注 createWebApplicationContext 方法，
+此处关注 ContextLoader类的createWebApplicationContext 方法，
 
 ```java
 protected WebApplicationContext createWebApplicationContext(ServletContext sc) {
@@ -113,7 +113,7 @@ protected WebApplicationContext createWebApplicationContext(ServletContext sc) {
 }
 ```
 
-从代码可知，方法中的逻辑主要是调用 determineContextClass 获取 contextClass ，然后根据 contextClass 创建 IOC 容器实例。所以， contextClass 的值将是关键。继续跟进determineContextClass方法，
+从代码可知，方法中的逻辑主要是调用  ContextLoader类的determineContextClass 获取 contextClass ，然后根据 contextClass 创建 IOC 容器实例。所以， contextClass 的值将是关键。继续跟进 ContextLoader类的determineContextClass方法，
 
 ```java
 protected Class<?> determineContextClass(ServletContext servletContext) {
@@ -164,7 +164,7 @@ org.springframework.web.context.WebApplicationContext=org.springframework.web.co
 
 ##### 2.寻找关键入口方法refresh()
 
-我们回到 ContextLoader 的 initWebApplicationContext 方法，前边我们说到调用 createWebApplicationContext 方法创建容器，容器创建后我们关注的下一个方法是 configureAndRefreshWebApplicationContext，
+我们回到 ContextLoader 的 initWebApplicationContext 方法，前边我们说到调用 createWebApplicationContext 方法创建容器，容器创建后我们关注的下一个方法是 ContextLoader类的configureAndRefreshWebApplicationContext，
 
 ```java
 public WebApplicationContext initWebApplicationContext(ServletContext servletContext) {
@@ -233,53 +233,12 @@ public void refresh() throws BeansException, IllegalStateException {
         prepareBeanFactory(beanFactory);
 
         try {
-            // Allows post-processing of the bean factory in context subclasses.
-            postProcessBeanFactory(beanFactory);
-
-            // Invoke factory processors registered as beans in the context.
-            invokeBeanFactoryPostProcessors(beanFactory);
-
-            // Register bean processors that intercept bean creation.
-            registerBeanPostProcessors(beanFactory);
-
-            // Initialize message source for this context.
-            initMessageSource();
-
-            // Initialize event multicaster for this context.
-            initApplicationEventMulticaster();
-
-            // Initialize other special beans in specific context subclasses.
-            onRefresh();
-
-            // Check for listener beans and register them.
-            registerListeners();
-
-            // Instantiate all remaining (non-lazy-init) singletons.
-            finishBeanFactoryInitialization(beanFactory);
-
-            // Last step: publish corresponding event.
-            finishRefresh();
+            ...
         }
-
         catch (BeansException ex) {
-            if (logger.isWarnEnabled()) {
-                logger.warn("Exception encountered during context initialization - " +
-                        "cancelling refresh attempt: " + ex);
-            }
-
-            // Destroy already created singletons to avoid dangling resources.
-            destroyBeans();
-
-            // Reset 'active' flag.
-            cancelRefresh(ex);
-
-            // Propagate exception to caller.
-            throw ex;
+            ...
         }
-
         finally {
-            // Reset common introspection caches in Spring's core, since we
-            // might not ever need metadata for singleton beans anymore...
             resetCommonCaches();
         }
     }
@@ -348,7 +307,7 @@ protected void loadBeanDefinitions(DefaultListableBeanFactory beanFactory) throw
 }
 ```
 
-方法最后是调用了重载的 loadBeanDefinitions 方法，传入的参数是 XmlBeanDefinitionReader 的对象，我们先看一看重载的 loadBeanDefinitions 方法，
+方法最后是调用了重载的 loadBeanDefinitions 方法，传入的参数是 **XmlBeanDefinitionReader** 的对象，我们先看一看重载的 loadBeanDefinitions 方法，
 
 ```java
 protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws IOException {
@@ -469,3 +428,384 @@ public void registerBeanDefinitions(Document doc, XmlReaderContext readerContext
 
 按照惯例，干活的是do开头的方法，
 
+```java
+protected void doRegisterBeanDefinitions(Element root) {
+    BeanDefinitionParserDelegate parent = this.delegate;
+    this.delegate = createDelegate(getReaderContext(), root, parent);
+
+    if (this.delegate.isDefaultNamespace(root)) {
+        String profileSpec = root.getAttribute(PROFILE_ATTRIBUTE);
+        if (StringUtils.hasText(profileSpec)) {
+            String[] specifiedProfiles = StringUtils.tokenizeToStringArray(
+                    profileSpec, BeanDefinitionParserDelegate.MULTI_VALUE_ATTRIBUTE_DELIMITERS);
+            if (!getReaderContext().getEnvironment().acceptsProfiles(specifiedProfiles)) {
+                if (logger.isInfoEnabled()) {
+                    logger.info("Skipped XML bean definition file due to specified profiles [" + profileSpec +
+                            "] not matching: " + getReaderContext().getResource());
+                }
+                return;
+            }
+        }
+    }
+
+    preProcessXml(root);
+    /** 解析转换为BeanDefinitions **/
+    parseBeanDefinitions(root, this.delegate);
+    postProcessXml(root);
+
+    this.delegate = parent;
+}
+```
+
+然后是 parseBeanDefinitions 方法
+
+```java
+protected void parseBeanDefinitions(Element root, BeanDefinitionParserDelegate delegate) {
+    if (delegate.isDefaultNamespace(root)) {
+        NodeList nl = root.getChildNodes();
+        for (int i = 0; i < nl.getLength(); i++) {
+            Node node = nl.item(i);
+            if (node instanceof Element) {
+                Element ele = (Element) node;
+                /**判断元素是否属于默认的Namespace（当标签为<beans>时判断条件为真） **/
+                if (delegate.isDefaultNamespace(ele)) {
+                    /** 处理默认的Element **/
+                    parseDefaultElement(ele, delegate);
+                }
+                else {
+                    delegate.parseCustomElement(ele);
+                }
+            }
+        }
+    }
+    else {
+        delegate.parseCustomElement(root);
+    }
+}
+```
+
+isDefaultNamespaces 方法是判断元素是否属于默认的 Namespace ，通过跟踪可知，这个默认的 Namespace 是指 `<beans>` 标签， 我们知道在spring的配置文件中，对bean的定义是放在 `<beans>` 标签里边的，所以接下来的 parseDefaultElement 方法则是用于解析 bean 定义的。
+
+```java
+private void parseDefaultElement(Element ele, BeanDefinitionParserDelegate delegate) {
+    /** 处理<import>标签 **/
+    if (delegate.nodeNameEquals(ele, IMPORT_ELEMENT)) {
+        importBeanDefinitionResource(ele);
+    }
+    /** 处理<alias>标签 **/
+    else if (delegate.nodeNameEquals(ele, ALIAS_ELEMENT)) {
+        processAliasRegistration(ele);
+    }
+    /** 处理<bean>标签 **/
+    else if (delegate.nodeNameEquals(ele, BEAN_ELEMENT)) {
+        processBeanDefinition(ele, delegate);
+    }
+    /** 处理嵌套的<beans>标签 **/
+    else if (delegate.nodeNameEquals(ele, NESTED_BEANS_ELEMENT)) {
+        // recurse
+        doRegisterBeanDefinitions(ele);
+    }
+}
+```
+
+到这里我们就一目了然了，这很显然就是针对 `<beans>` 标签中的各种元素进行解析，对于其他标签我们不深究，直接看处理 `<bean>` 标签的 processBeanDefinition 方法
+
+```java
+protected void processBeanDefinition(Element ele, BeanDefinitionParserDelegate delegate) {
+    /**
+	 * 调用BeanDefinitionParserDelegate的parseBeanDefinitionElement方法
+	 * 返回一个包含BeanDefinition信息的BeanDefinitionHolder实例
+	 * **/
+    BeanDefinitionHolder bdHolder = delegate.parseBeanDefinitionElement(ele);
+    if (bdHolder != null) {
+        bdHolder = delegate.decorateBeanDefinitionIfRequired(ele, bdHolder);
+        try {
+            /**
+			 * 注册BeanDefinition
+			 * 传入的参数是刚刚获取到的BeanDefinitionHolder对象，再加上DefaultListableBeanFactory对象
+			 * DefaultListableBeanFactory对象的由来需要追溯到AbstractRefreshableApplicationContext的refreshBeanFactory()方法中
+			 * **/
+            BeanDefinitionReaderUtils.registerBeanDefinition(bdHolder, getReaderContext().getRegistry());
+        }
+        catch (BeanDefinitionStoreException ex) {
+            getReaderContext().error("Failed to register bean definition with name '" +
+                    bdHolder.getBeanName() + "'", ele, ex);
+        }
+        // Send registration event.
+        getReaderContext().fireComponentRegistered(new BeanComponentDefinition(bdHolder));
+    }
+}
+```
+
+这里有两个非常关键的方法：
+
+- 一个是 parseBeanDefinitionElement ，这个方法最终会返回一个持有 BeanDefinition 的 BeanDefinitionHolder 实例，我们在上篇开头的结论中已经说了，加载的过程其实就是把bean的定义转换成一个 BeanDefinition 对象，所以 parseBeanDefinitionElement 对应的便是 「加载」 过程；
+- 另一个则是 registerBeanDefinition ，这个方法对应的便是「注册」过程。
+
+接下来我们将分两部分分别讲解 parseBeanDefinitionElement 和 registerBeanDefinition 的内容。
+
+###### 加载(parseBeanDefinitionElement )
+
+`BeanDefinitionHolder bdHolder = delegate.parseBeanDefinitionElement(ele);` 中的 delegate 是 BeanDefinitionParserDelegate 的实例，我们查看 BeanDefinitionParserDelegate 中的 parseBeanDefinitionElement方法.
+
+```java
+public BeanDefinitionHolder parseBeanDefinitionElement(Element ele) {
+    return parseBeanDefinitionElement(ele, null);
+}
+```
+
+```java
+public BeanDefinitionHolder parseBeanDefinitionElement(Element ele, BeanDefinition containingBean) {
+    ...
+    AbstractBeanDefinition beanDefinition = parseBeanDefinitionElement(ele, beanName, containingBean);
+    ...
+    return null;
+}
+```
+
+```java
+public AbstractBeanDefinition parseBeanDefinitionElement(
+        Element ele, String beanName, BeanDefinition containingBean) {
+
+    this.parseState.push(new BeanEntry(beanName));
+
+    String className = null;
+    if (ele.hasAttribute(CLASS_ATTRIBUTE)) {
+        className = ele.getAttribute(CLASS_ATTRIBUTE).trim();
+    }
+
+    try {
+        String parent = null;
+        if (ele.hasAttribute(PARENT_ATTRIBUTE)) {
+            parent = ele.getAttribute(PARENT_ATTRIBUTE);
+        }
+        AbstractBeanDefinition bd = createBeanDefinition(className, parent);
+        /** 解析bean定义的属性 **/
+        parseBeanDefinitionAttributes(ele, beanName, containingBean, bd);
+        bd.setDescription(DomUtils.getChildElementValueByTagName(ele, DESCRIPTION_ELEMENT));
+
+        parseMetaElements(ele, bd);
+        parseLookupOverrideSubElements(ele, bd.getMethodOverrides());
+        parseReplacedMethodSubElements(ele, bd.getMethodOverrides());
+
+        parseConstructorArgElements(ele, bd);
+        parsePropertyElements(ele, bd);
+        parseQualifierElements(ele, bd);
+
+        bd.setResource(this.readerContext.getResource());
+        bd.setSource(extractSource(ele));
+
+        return bd;
+    }
+    catch (ClassNotFoundException ex) {
+        error("Bean class [" + className + "] not found", ele, ex);
+    }
+    catch (NoClassDefFoundError err) {
+        error("Class that bean class [" + className + "] depends on not found", ele, err);
+    }
+    catch (Throwable ex) {
+        error("Unexpected failure during bean definition parsing", ele, ex);
+    }
+    finally {
+        this.parseState.pop();
+    }
+
+    return null;
+}
+```
+
+这里的parse开头的方法都是对bean定义的属性标签进行解析，例如「name」、「singleton」、「lazy-init」等，大家可以自行深入了解每一个parse方法是如何解析各个属性的，此次不再逐一讲解了。至此我们已经获取到了BeanDefinition的信息，下一步就到「注册」了。
+
+###### 注册(registerBeanDefinition )
+
+所谓的注册，其实就是把BeanDefintion存储到IOC容器中，我们进入到 registerBeanDefinition 中看一看是如何实现的。
+
+```java
+public static void registerBeanDefinition(
+        BeanDefinitionHolder definitionHolder, BeanDefinitionRegistry registry)
+        throws BeanDefinitionStoreException {
+
+    // Register bean definition under primary name.
+    String beanName = definitionHolder.getBeanName();
+    	/** 此处实际是调用DefaultListableBeanFactory的registerBeanDefinition方法 **/
+    registry.registerBeanDefinition(beanName, definitionHolder.getBeanDefinition());
+
+    // Register aliases for bean name, if any.
+    String[] aliases = definitionHolder.getAliases();
+    if (aliases != null) {
+        for (String alias : aliases) {
+            registry.registerAlias(beanName, alias);
+        }
+    }
+}
+```
+
+这里最终调用的是 registry.registerBeanDefinition(beanName, definitionHolder.getBeanDefinition()) 其中 registry 是 DefaultListableBeanFactory 的实例。
+
+（为什么是 DefaultListableBeanFactory ？在 AbstractRefreshableApplicationContext 的 refreshBeanFactory() 方法中会创建DefaultListableBeanFactory的实例，并在之后的所有关键方法中都会作为参数传入该实例，保证后续的调用流程中都能获取到该实例）
+
+DefaultListableBeanFactory 的 registerBeanDefinition 方法如下
+
+```
+@Override
+public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition)
+        throws BeanDefinitionStoreException {
+	...
+    BeanDefinition existingDefinition = this.beanDefinitionMap.get(beanName);
+    if (existingDefinition != null) {
+        ...
+        this.beanDefinitionMap.put(beanName, beanDefinition);
+    } else {
+        if (hasBeanCreationStarted()) {
+            // Cannot modify startup-time collection elements anymore (for stable iteration)
+            synchronized (this.beanDefinitionMap) {
+                this.beanDefinitionMap.put(beanName, beanDefinition);
+                List<String> updatedDefinitions = new ArrayList<String>(this.beanDefinitionNames.size() + 1);
+                updatedDefinitions.addAll(this.beanDefinitionNames);
+                updatedDefinitions.add(beanName);
+                this.beanDefinitionNames = updatedDefinitions;
+                if (this.manualSingletonNames.contains(beanName)) {
+                    Set<String> updatedSingletons = new LinkedHashSet<String>(this.manualSingletonNames);
+                    updatedSingletons.remove(beanName);
+                    this.manualSingletonNames = updatedSingletons;
+                }
+            }
+        }
+        else {
+            /**
+			 * 把BeanDefinitionc添加到beanDefinitionMap中
+			 * Map<String, BeanDefinition> beanDefinitionMap = new ConcurrentHashMap<>(256);
+			 * 由此可知，IOC的启动过程是先把Bean的定义解析转换为BeanDefiniton，
+			 * 最后存储于IOC容器（DefaultListableBeanFactory是一个IOC容器）的一个Map变量中。
+			 * */
+            this.beanDefinitionMap.put(beanName, beanDefinition);
+            /**
+			 * 把所有的Bean名存储于beanDefinitionNames列表中
+			 */
+            this.beanDefinitionNames.add(beanName);
+            this.manualSingletonNames.remove(beanName);
+        }
+        this.frozenBeanDefinitionNames = null;
+    }
+
+    if (existingDefinition != null || containsSingleton(beanName)) {
+        resetBeanDefinition(beanName);
+    }
+}
+```
+
+`this.beanDefinitionMap.put(beanName, beanDefinition);` 这一行是重点，字面意思已经很明显，就是把 beanName 和 beanDefinition 以 key-value 的形式存储于 beanDefinitionMap 中， beanDefinitionMap 的定义如下。
+
+```java
+private final Map<String, BeanDefinition> beanDefinitionMap = new ConcurrentHashMap<String, BeanDefinition>(256);
+```
+
+跟踪到这一步我们便可以得出结论：「 BeanDefinition 是存储在 DefaultListableBeanFactory 的一个 Map 数据结构中 」
+
+##### 4.定位
+
+![](E:\sourceCode\JavaGuide\mynodes\img\SpringIOC.jpg)
+
+ 入口ContextLoader 的 configureAndRefreshWebApplicationContext 方法。
+
+```java
+protected void configureAndRefreshWebApplicationContext(ConfigurableWebApplicationContext wac, ServletContext sc) {
+    if (ObjectUtils.identityToString(wac).equals(wac.getId())) {
+        String idParam = sc.getInitParameter(CONTEXT_ID_PARAM);
+        if (idParam != null) {
+            wac.setId(idParam);
+        }
+        else {
+            wac.setId(ConfigurableWebApplicationContext.APPLICATION_CONTEXT_ID_PREFIX +
+                    ObjectUtils.getDisplayString(sc.getContextPath()));
+        }
+    }
+
+    wac.setServletContext(sc);
+    /**
+     * CONFIG_LOCATION_PARAM = "contextConfigLocation"
+     * 对应的含义是读取web.xml中contextConfigLocation的值
+     */
+    String configLocationParam = sc.getInitParameter(CONFIG_LOCATION_PARAM);
+    if (configLocationParam != null) {
+        wac.setConfigLocation(configLocationParam);
+    }
+
+    ConfigurableEnvironment env = wac.getEnvironment();
+    if (env instanceof ConfigurableWebEnvironment) {
+        ((ConfigurableWebEnvironment) env).initPropertySources(sc, null);
+    }
+
+    customizeContext(sc, wac);
+    wac.refresh();
+}
+```
+
+`wac.setConfigLocation(configLocationParam);`。configLocationParam 的值是调用 `sc.getInitParameter(CONFIG_LOCATION_PARAM);` 获取的，CONFIG_LOCATION_PARAM的值是 `"contextConfigLocation"` ，对于 `"contextConfigLocation"` 有印象吗？回顾我们的 web.xml 配置文件中可以看到，我们配置了一个 `<context-param>` 上下文参数，这个参数名便是 `contextConfigLocation` ， 而其值是便是我们自定义的 Spring 配置文件路径。
+
+```java
+<web-app>
+
+    <context-param>
+        <param-name>contextConfigLocation</param-name>
+        <param-value>classpath:spring.xml</param-value>
+    </context-param>
+
+    <!-- ContextLoaderListener -->
+    <listener>
+        <listener-class>org.springframework.web.context.ContextLoaderListener</listener-class>
+    </listener>
+
+    <!-- DispatcherServlet -->
+   ...
+</web-app>
+```
+
+还可以继续深入查看 setConfigLocation 的处理逻辑，其实现过程是在 AbstractRefreshableConfigApplicationContext 类中，通过代码可知道配置文件支持的分隔符有`,; \t\n`。
+
+接下来我们直接分析 XmlWebApplicationContext 的 loadBeanDefinitions(XmlBeanDefinitionReader) 方法，
+
+```java
+protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws IOException {
+    /** 获取配置文件位置*/
+    String[] configLocations = getConfigLocations();
+    if (configLocations != null) {
+        for (String configLocation : configLocations) {
+            /** 实际是调用XmlBeanDefinitionReader的loadBeanDefinitions方法 **/
+			reader.loadBeanDefinitions(configLocation);
+		}
+	}
+}
+```
+
+这个方法我们在前边也是看过的，当时我们只关注 `reader.loadBeanDefinitions(configLocation);` 这一行，这次我们关注第一行 `String[] configLocations = getConfigLocations();` ,从方法的字面意思就很容易理解它的作用——获取配置位置，很明显这就是我们的「定位」过程。
+getConfigLocations 的实现方法是在其父类 AbstractRefreshableConfigApplicationContext 中
+
+```java
+protected String[] getConfigLocations() {
+    return (this.configLocations != null ? this.configLocations : getDefaultConfigLocations());
+}
+```
+
+这个方法的意思是，当容器中的 configLocations 变量为空时则调用 getDefaultConfigLocations， 当不为空时直接返回容器中的 configLocations 。我们先看一看 XmlWebApplicationContext类中的getDefaultConfigLocations 方法，
+
+```java
+@Override
+protected String[] getDefaultConfigLocations() {
+    if (getNamespace() != null) {
+        return new String[] {DEFAULT_CONFIG_LOCATION_PREFIX + getNamespace() + DEFAULT_CONFIG_LOCATION_SUFFIX};
+    }
+    else {
+        return new String[] {DEFAULT_CONFIG_LOCATION};
+    }
+}
+```
+
+DEFAULT_CONFIG_LOCATION 的定义是
+
+```java
+public static final String DEFAULT_CONFIG_LOCATION = "/WEB-INF/applicationContext.xml";
+```
+
+`/WEB-INF/applicationContext.xml` 便是我们再熟悉不过的 Spring 默认的配置文件路径与文件名。
+而当我们再 web.xml 配置了 contextConfigLocation ，Spring则会读取我们的自定义 Spring 配置文件。至此，关于「定位」的过程已经完整讲解完毕。
